@@ -8,43 +8,115 @@
         body { font-family: Arial, sans-serif; background-color: #f4f4f9; padding: 20px; }
         .container { max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
         input, button { padding: 10px; margin: 5px 0; width: 100%; box-sizing: border-box; }
-        button { background-color: #28a745; color: white; border: none; cursor: pointer; font-weight: bold; }
+        button { background-color: #28a745; color: white; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; }
         button:hover { background-color: #218838; }
+        .logout-btn { background-color: #dc3545; width: auto; padding: 5px 15px; float: right; margin-top: -40px;}
+        .logout-btn:hover { background-color: #c82333; }
         ul { list-style-type: none; padding: 0; }
         li { background: #eee; margin: 5px 0; padding: 10px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }
         .delete-btn { background-color: #dc3545; width: auto; padding: 5px 10px; margin: 0; }
+        .delete-btn:hover { background-color: #c82333; }
+        #loginScreen, #appScreen { display: none; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>📚 My Library App</h2>
+    <!-- LOGIN SCREEN -->
+    <div id="loginScreen">
+        <h2>🔐 Admin Login</h2>
+        <input type="text" id="loginUsername" placeholder="Username (admin)">
+        <input type="password" id="loginPassword" placeholder="Password (password)">
+        <button onclick="login()">Login</button>
+        <p id="loginError" style="color: red; font-size: 14px;"></p>
+    </div>
 
-    <h3>Add a New Book</h3>
-    <input type="text" id="titleInput" placeholder="Book Title (e.g., The Hobbit)">
-    <input type="text" id="authorInput" placeholder="Author (e.g., J.R.R. Tolkien)">
-    <button onclick="addBook()">Add Book to Library</button>
+    <!-- MAIN APP SCREEN -->
+    <div id="appScreen">
+        <h2>📚 My Library App <button class="logout-btn" onclick="logout()">Logout</button></h2>
 
-    <h3>Library Catalogue</h3>
-    <ul id="bookList">
-        <!-- Books will appear here -->
-    </ul>
+        <h3>Add a New Book</h3>
+        <input type="text" id="titleInput" placeholder="Book Title (e.g., The Hobbit)">
+        <input type="text" id="authorInput" placeholder="Author (e.g., J.R.R. Tolkien)">
+        <button onclick="addBook()">Add Book to Library</button>
+
+        <h3>Library Catalogue</h3>
+        <ul id="bookList"></ul>
+    </div>
 </div>
 
 <script>
-    // 1. Fetch books when the page loads
+    // 1. Check if user is already logged in on page load
     window.onload = function() {
-        loadBooks();
+        const token = localStorage.getItem('jwtToken');
+        if (token) {
+            showAppScreen();
+            loadBooks();
+        } else {
+            showLoginScreen();
+        }
     };
 
-    // 2. Function to GET all books from your Java API
+    function showLoginScreen() {
+        document.getElementById('loginScreen').style.display = 'block';
+        document.getElementById('appScreen').style.display = 'none';
+    }
+
+    function showAppScreen() {
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('appScreen').style.display = 'block';
+    }
+
+    // 2. Handle Login
+    function login() {
+        const username = document.getElementById('loginUsername').value;
+        const password = document.getElementById('loginPassword').value;
+        const errorMsg = document.getElementById('loginError');
+
+        fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: username, password: password })
+        })
+            .then(response => {
+                if (response.ok) return response.json();
+                throw new Error('Bad credentials');
+            })
+            .then(data => {
+                localStorage.setItem('jwtToken', data.token); // Save the token
+                errorMsg.innerText = "";
+                showAppScreen();
+                loadBooks();
+            })
+            .catch(error => {
+                errorMsg.innerText = "Invalid username or password!";
+            });
+    }
+
+    // 3. Handle Logout
+    function logout() {
+        localStorage.removeItem('jwtToken');
+        showLoginScreen();
+    }
+
+    // 4. Helper function to get headers with the Token
+    function getAuthHeaders() {
+        return {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + localStorage.getItem('jwtToken')
+        };
+    }
+
+    // 5. Load Books
     function loadBooks() {
-        fetch('/books')
-            .then(response => response.json())
+        fetch('/books', { headers: getAuthHeaders() })
+            .then(response => {
+                if (response.status === 403 || response.status === 401) logout(); // Token expired
+                return response.json();
+            })
             .then(books => {
                 const list = document.getElementById('bookList');
-                list.innerHTML = ''; // Clear current list
-
+                list.innerHTML = '';
                 books.forEach(book => {
                     const li = document.createElement('li');
                     li.innerHTML = `
@@ -56,7 +128,7 @@
             });
     }
 
-    // 3. Function to POST a new book to your Java API
+    // 6. Add Book
     function addBook() {
         const title = document.getElementById('titleInput').value;
         const author = document.getElementById('authorInput').value;
@@ -66,38 +138,34 @@
             return;
         }
 
-        const newBook = {
-            title: title,
-            author: author,
-            available: true
-        };
+        const newBook = { title: title, author: author, available: true };
 
         fetch('/books', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getAuthHeaders(),
             body: JSON.stringify(newBook)
         })
             .then(response => {
                 if (response.ok) {
                     document.getElementById('titleInput').value = '';
                     document.getElementById('authorInput').value = '';
-                    loadBooks(); // Refresh the list
+                    loadBooks();
                 }
             });
     }
 
-    // 4. Function to DELETE a book by ID
+    // 7. Delete Book
     function deleteBook(id) {
         if (confirm("Are you sure you want to delete this book?")) {
-            fetch(`/books/${id}`, { method: 'DELETE' })
+            fetch(`/books/${id}`, {
+                method: 'DELETE',
+                headers: getAuthHeaders()
+            })
                 .then(response => {
-                    if (response.ok) {
-                        loadBooks(); // Refresh the list
-                    }
+                    if (response.ok) loadBooks();
                 });
         }
     }
 </script>
-
 </body>
 </html>
